@@ -83,17 +83,6 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         startActivity(intent)
     }
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            // The service is connected, you can safely unbind it
-            Log.d("NotificationListener", "Service connected")
-        }
-
-        override fun onServiceDisconnected(name: ComponentName) {
-            // The service is disconnected
-            Log.d("NotificationListener", "Service disconnected")
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d("enablingScreen01", "Notification text: 0")
@@ -102,12 +91,10 @@ class MainActivity : ComponentActivity() {
             Log.e("NotificationListener", "Notification Listener Service is not enabled")
             // Show a message to the user asking them to enable the service
             openNotificationListenerSettings()
-            return
         }
         // check permiso1_end
         // inicializar_servicio_end
-        val notificationListener = NotificationListener()
-        notificationListener.loadTime(this)
+        NotificationListener.loadTime(this)
         // inicializar_servicio_start
         // pantalla_bloqueada_start
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
@@ -180,24 +167,12 @@ class MainActivity : ComponentActivity() {
         // layout_end
 
         super.onCreate(savedInstanceState)
-        val notificationListenerEnabled = Settings.Secure.getString(this.contentResolver, "enabled_notification_listeners")
-        val packageName = packageName
-        if (notificationListenerEnabled == null || !notificationListenerEnabled.contains(packageName)) {
-            // El servicio de notificación no está habilitado, abre la configuración
-            val intent2 = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
-            startActivity(intent2)
-        } else {
-            // El servicio de notificación ya está habilitado, no hagas nada
-        }
-
-
         mediaPlayer = MediaPlayer.create(applicationContext, R.raw.alarm_sound)
         // Iniciar servicio start
         //val intent = Intent(this, NotificationListener::class.java)
-        val intent = Intent(this, NotificationListener::class.java)
-        if (!bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)) {
-            // The service is not running, so we start it
-            startService(intent)
+        val componentName = ComponentName(this, NotificationListener::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            android.service.notification.NotificationListenerService.requestRebind(componentName)
         }
 
         // Iniciar servicio end
@@ -240,8 +215,7 @@ class MainActivity : ComponentActivity() {
                             val minute1Int = minute1.toIntOrNull() ?: -1
                             val hour2Int = hour2.toIntOrNull() ?: -1
                             val minute2Int = minute2.toIntOrNull() ?: -1
-                            val notificationListener = NotificationListener()
-                            notificationListener.setTime(this@MainActivity, hour1Int, minute1Int, hour2Int, minute2Int)
+                            NotificationListener.setTime(this@MainActivity, hour1Int, minute1Int, hour2Int, minute2Int)
                         }
                         CustomCheckboxDeshabilitarAlarma(Modifier.padding(bottom = 4.dp))
                     }
@@ -249,11 +223,6 @@ class MainActivity : ComponentActivity() {
 
             }
         }
-    }
-    override fun onDestroy() {
-        super.onDestroy()
-        // Unbind the service when the activity is destroyed
-        unbindService(serviceConnection)
     }
 }
 
@@ -269,7 +238,7 @@ fun MyApp(context: Context, modifier: Modifier = Modifier) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Button(onClick = {
             /* Aquí va el código que se ejecutará al presionar el botón */
-            NotificationListener.notificationPresent = false
+            NotificationListener.stopAudio()
             setVolumeToMin(context)
         }) {
             Text("Apagar")
@@ -277,27 +246,31 @@ fun MyApp(context: Context, modifier: Modifier = Modifier) {
     }
 }
 fun setScreenState(context: Context, shouldKeepScreenOn: Boolean) {
-    val activity = context as Activity
-    if (shouldKeepScreenOn) {
-        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    } else {
-        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    val activity = context as? Activity
+    if (activity != null) {
+        if (shouldKeepScreenOn) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 }
 @Composable
 fun CustomCheckboxDeshabilitarAlarma(modifier: Modifier = Modifier) {
-    val checked = remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val sharedPref = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+    val checked = remember { mutableStateOf(sharedPref.getBoolean("NoHacerSonar", false)) }
     val showDialog = remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
+    val timer = remember {
+        object: CountDownTimer(6000, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                // Nada que hacer aquí
+            }
 
-    val timer: CountDownTimer = object: CountDownTimer(6000, 1000) {
-        override fun onTick(millisUntilFinished: Long) {
-            // Nada que hacer aquí
-        }
-
-        override fun onFinish() {
-            setScreenState(context, false)
+            override fun onFinish() {
+                setScreenState(context, false)
+            }
         }
     }
 
@@ -310,7 +283,7 @@ fun CustomCheckboxDeshabilitarAlarma(modifier: Modifier = Modifier) {
                 Button(
                     onClick = {
                         checked.value = true
-                        NotificationListener.NoHacerSonarMediaPlayerCheckbox = checked.value
+                        sharedPref.edit().putBoolean("NoHacerSonar", true).apply()
                         showDialog.value = false
                     }
                 ) {
@@ -321,7 +294,7 @@ fun CustomCheckboxDeshabilitarAlarma(modifier: Modifier = Modifier) {
                 Button(
                     onClick = {
                         checked.value = false
-                        NotificationListener.NoHacerSonarMediaPlayerCheckbox = checked.value
+                        sharedPref.edit().putBoolean("NoHacerSonar", false).apply()
                         showDialog.value = false
                     }
                 ) {
@@ -339,7 +312,7 @@ fun CustomCheckboxDeshabilitarAlarma(modifier: Modifier = Modifier) {
                     showDialog.value = true
                 } else {
                     checked.value = false
-                    NotificationListener.NoHacerSonarMediaPlayerCheckbox = checked.value
+                    sharedPref.edit().putBoolean("NoHacerSonar", false).apply()
                     timer.start()
                 }
             },

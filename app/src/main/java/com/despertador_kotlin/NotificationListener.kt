@@ -25,23 +25,22 @@ import java.util.Calendar
 class NotificationListener : NotificationListenerService() {
     private lateinit var mediaPlayer: MediaPlayer
     companion object {
+        var instance: NotificationListener? = null
         var notificationPresent:Boolean = false
-        var NoHacerSonarMediaPlayerCheckbox:Boolean = false
         var hora_inicio: Int = 0
         var minuto_inicio: Int = 0
         var hora_final: Int = 0
         var minuto_final: Int = 0
-        var service_iniciado: Int = 0
-    }
 
-    private lateinit var handler: Handler
-    private lateinit var runnable: Runnable
-    fun saveTime(context: Context, hour1: Int, minute1: Int, hour2: Int, minute2: Int) {
-        try {
+        fun loadTime(context: Context) {
+            val sharedPref = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+            hora_inicio = sharedPref.getInt("hour1", -1)
+            minuto_inicio = sharedPref.getInt("minute1", -1)
+            hora_final = sharedPref.getInt("hour2", -1)
+            minuto_final = sharedPref.getInt("minute2", -1)
+        }
 
-            if (service_iniciado == 0) {
-                return
-            }
+        fun saveTime(context: Context, hour1: Int, minute1: Int, hour2: Int, minute2: Int) {
             val sharedPref = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
 
             with (sharedPref.edit()) {
@@ -51,38 +50,36 @@ class NotificationListener : NotificationListenerService() {
                 putInt("minute2", minute2)
                 apply()
             }
-        } catch (e: NullPointerException) {
-            Log.e("NotificationListener", "NullPointerException: ", e)
         }
-    }
-    fun loadTime(context: Context) {
-        val sharedPref = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
-        hora_inicio = sharedPref.getInt("hour1", -1)
-        minuto_inicio = sharedPref.getInt("minute1", -1)
-        hora_final = sharedPref.getInt("hour2", -1)
-        minuto_final = sharedPref.getInt("minute2", -1)
-        Log.d("LoadingTimeAppx1", "Notification text: ${hora_inicio}, min ${minuto_inicio}," +
-                " tiempo final ${hora_final} min ${minuto_final}")
 
-    }
-
-
-    fun setTime(context: Context, hour1: Int, minute1: Int, hour2: Int, minute2: Int) {
-        hora_inicio = hour1
-        minuto_inicio = minute1
-        hora_final = hour2
-        minuto_final = minute2
-        if (service_iniciado == 1) {
+        fun setTime(context: Context, hour1: Int, minute1: Int, hour2: Int, minute2: Int) {
+            hora_inicio = hour1
+            minuto_inicio = minute1
+            hora_final = hour2
+            minuto_final = minute2
             saveTime(context, hour1, minute1, hour2, minute2)
         }
-
-        Log.d("UpdatingTimeAppx1", "Notification text: ${hora_inicio}, min ${minuto_inicio}," +
-                " tiempo final ${hora_final} min ${minuto_final}")
+        
+        fun stopAudio() {
+            notificationPresent = false
+            instance?.let {
+                if (it::mediaPlayer.isInitialized && it.mediaPlayer.isPlaying) {
+                    it.mediaPlayer.stop()
+                }
+            }
+        }
     }
+
+    private lateinit var handler: Handler
+    private lateinit var runnable: Runnable
     fun setVolumeToMax() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVolume, 0)
+        try {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVolume, 0)
+        } catch (e: SecurityException) {
+            Log.e("NotificationListener", "Permiso denegado para subir volumen (Modo No Molestar activo)", e)
+        }
     }
     fun isNotificationServiceEnabled(): Boolean {
         val pkgName = packageName
@@ -115,41 +112,24 @@ class NotificationListener : NotificationListenerService() {
 
 
     }
-    fun tryReconnectService() {
-        toggleNotificationListenerService()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val componentName = ComponentName(this, NotificationListener::class.java)
-            NotificationListenerService.requestRebind(componentName)
-        }
-    }
-
-    private fun toggleNotificationListenerService() {
-        val pm = packageManager
-        pm.setComponentEnabledSetting(
-            ComponentName(this, NotificationListener::class.java),
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            PackageManager.DONT_KILL_APP
-        )
-        pm.setComponentEnabledSetting(
-            ComponentName(this, NotificationListener::class.java),
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            PackageManager.DONT_KILL_APP
-        )
-    }
     fun startMediaPlayer() {
+        val sharedPref = getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+        val noHacerSonar = sharedPref.getBoolean("NoHacerSonar", false)
         val currentTime = Calendar.getInstance()
         val currentHour = currentTime.get(Calendar.HOUR_OF_DAY)
         //if (!NoHacerSonarMediaPlayerCheckbox && !mediaPlayer.isPlaying && (currentHour < 10 || currentHour > 14)) {
 
         //if (!NoHacerSonarMediaPlayerCheckbox && !mediaPlayer.isPlaying) {
-        if (!NoHacerSonarMediaPlayerCheckbox) {
+        if (!noHacerSonar) {
             //mediaPlayer.isLooping = true
             try {
                 //mediaPlayer.prepare()
-                if (mediaPlayer != null) {
+                if (::mediaPlayer.isInitialized) {
+                    if (mediaPlayer.isPlaying) mediaPlayer.stop()
                     mediaPlayer.release()
                 }
                 mediaPlayer = MediaPlayer.create(applicationContext, R.raw.alarm_sound)
+                mediaPlayer.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
 
             } catch (e: Exception) {
                 Log.e("NotificationListener_1", "Exception while releasing MediaPlayer", e)
@@ -160,8 +140,8 @@ class NotificationListener : NotificationListenerService() {
     }
     override fun onCreate() {
         super.onCreate()
+        instance = this
         loadTime(this)
-        service_iniciado = 1
         Log.d("NotificationListenerOnCreate", "Notification text: ")
 
         mediaPlayer = MediaPlayer.create(applicationContext, R.raw.alarm_sound)
@@ -169,7 +149,6 @@ class NotificationListener : NotificationListenerService() {
         handler = Handler(Looper.getMainLooper())
         runnable = object : Runnable {
             override fun run() {
-                tryReconnectService()
                 if (notificationPresent && !mediaPlayer.isPlaying) {
                     startMediaPlayer()
                 }
@@ -193,6 +172,7 @@ class NotificationListener : NotificationListenerService() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (!notificationManager.isNotificationListenerAccessGranted(ComponentName(this, NotificationListener::class.java))) {
             val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         }
         val notification = sbn.notification
@@ -296,11 +276,14 @@ class NotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (mediaPlayer.isPlaying) {
-            //mediaPlayer.stop()
+        instance = null
+        if (::mediaPlayer.isInitialized && mediaPlayer.isPlaying) {
+            mediaPlayer.stop()
         }
-        //mediaPlayer.release()
-        //stopRunnable()
+        if (::mediaPlayer.isInitialized) {
+            mediaPlayer.release()
+        }
+        stopRunnable()
     }
 
 }
