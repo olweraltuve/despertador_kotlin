@@ -60,6 +60,12 @@ class NotificationListener : NotificationListenerService() {
             saveTime(context, hour1, minute1, hour2, minute2)
         }
         
+        fun isAudioPlaying(): Boolean {
+            return instance?.let {
+                it::mediaPlayer.isInitialized && it.mediaPlayer.isPlaying
+            } ?: false
+        }
+        
         fun stopAudio() {
             notificationPresent = false
             instance?.let {
@@ -187,12 +193,30 @@ class NotificationListener : NotificationListenerService() {
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.lowercase()
         val text = listOfNotNull("$appName (<-appIs-)", title, text_normal, subText).joinToString(" ")
         Log.d("NotificationListener", "Notification text: $text")
-        //if (text != null && text.contains("pattern,", true)) {
-        //if (text != null && text.contains("prog1", true)) {
-        if (text.contains("prog1", ignoreCase = true)) {
+
+        val sharedPref = getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+        val keywords = sharedPref.getStringSet("keywords", setOf("prog1")) ?: setOf("prog1")
+        val disabledKeywords = sharedPref.getStringSet("disabled_keywords", setOf()) ?: setOf()
+        val activeKeywords = keywords - disabledKeywords
+
+        val matchesKeyword = activeKeywords.any { keyword -> text.contains(keyword, ignoreCase = true) }
+
+        if (matchesKeyword) {
             notificationPresent = true
             if (!mediaPlayer.isPlaying) {
                 startMediaPlayer()
+                
+                val noHacerSonar = sharedPref.getBoolean("NoHacerSonar", false)
+                if (!noHacerSonar) {
+                    val intent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e("NotificationListener", "Error starting MainActivity", e)
+                    }
+                }
                 /*
                 val notificationIntent = Intent(this, MainActivity::class.java)
                 notificationIntent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -265,7 +289,14 @@ class NotificationListener : NotificationListenerService() {
         val notification = sbn.notification
         val extras = notification.extras
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.lowercase()
-        if (text != null && text.contains("prog1", true)) {
+
+        val sharedPref = getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+        val keywords = sharedPref.getStringSet("keywords", setOf("prog1")) ?: setOf("prog1")
+        val disabledKeywords = sharedPref.getStringSet("disabled_keywords", setOf()) ?: setOf()
+        val activeKeywords = keywords - disabledKeywords
+        val matchesKeyword = text != null && activeKeywords.any { keyword -> text.contains(keyword, ignoreCase = true) }
+
+        if (matchesKeyword) {
             //notificationPresent = false
             if (mediaPlayer.isPlaying) {
                 //mediaPlayer.stop()
